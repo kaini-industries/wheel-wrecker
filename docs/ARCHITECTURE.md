@@ -64,6 +64,30 @@ Verbose help/status output is suppressed during motion; `STATUS` returns only a
 short nonblocking `BUSY`. AccelStepper `run()` replaces the original blocking
 `runToPosition()` calls.
 
+## Display isolation
+
+The SSD1306 is an optional observer of controller state. It cannot arm motion,
+provide a position reference, or report successful opening. Startup probes
+`0x3C` and `0x3D`; absence leaves the serial and motion paths operational. A
+runtime NACK latches the display in `FAULT` until the operator disarms and
+issues `OLED RETRY`, avoiding continuous recovery traffic on a broken bus. The
+retry restarts the UNO R4 I²C peripheral before probing again.
+
+An SSD1306 full-frame I²C transfer is long compared with the interval between
+STEP pulses. `serviceDisplay()` therefore refuses to transfer while a motor
+segment or its settling dwell is active. The loop services the motor, accepts a
+bounded amount of serial input, services the motor again, paints a pending
+stationary frame, and then checks serial and motor state again before the next
+queued segment may start. This displays the upcoming target without allowing
+screen traffic to interrupt pulse timing or delaying a stop until after a new
+segment begins.
+
+The status snapshot explicitly calls position `CMD REF`: it is the commanded
+open-loop coordinate described below. ENA text is also a request, not feedback
+from the driver. The Adafruit library allocates a 1,024-byte 128×64 framebuffer
+only after a responding OLED has been found; the motion queue and serial parser
+remain fixed-size static buffers.
+
 The UNO R4 core's ordinary `pinMode(pin, OUTPUT)` initially selects a LOW output
 level. Startup therefore configures each Renesas GPIO's direction and safe level
 in one operation: ENA is made offline first, then active-low STEP is made idle.

@@ -16,15 +16,23 @@ changing one `stepsPerRevolution` number cannot fix all of them.
 5. Install the ENA− pull-down described in `HARDWARE.md`, and verify that the
    driver is offline during controller reset. A serial stop is not a substitute
    for the physical motor-power cutoff.
-6. Set the driver to a low current for the first test. Set 1/16 microstepping if
-   using the firmware's 3200-step default.
-7. Remove the motor-to-dial coupler. Mark the motor shaft and housing so full
+6. Set the driver to the first-test pattern documented in `HARDWARE.md`:
+   `S1..S6 = OFF, OFF, ON, ON, OFF, ON` (`↑ ↑ ↓ ↓ ↑ ↓`). This is 1/16
+   microstepping at the 1.0 A row and matches the firmware's 3,200-step default.
+7. If using the OLED, follow its printed `VCC`, `GND`, `SDA`, and `SCL` labels
+   to the main UNO R4 I²C bus as documented in `HARDWARE.md`. Do not rely on
+   wire color or assumed connector order. Confirm D4 remains dedicated to ENA.
+8. Remove the motor-to-dial coupler. Mark the motor shaft and housing so full
    revolutions are easy to count.
 
 ## 2. Unloaded direction and one-turn test
 
 Power the Arduino by USB and open a 115200-baud serial monitor. On every boot it
 must report `ENA offline requested`, `motion disarmed`, and `position unknown`.
+With the OLED attached, `STATUS` should also report `OLED=READY@0x3C` or
+`OLED=READY@0x3D`, and the screen should show `DISARMED`, `ENA:OFF?`, and
+`CMD REF UNKNOWN`. If it reports `OLED=MISSING`, leave the motor disarmed and
+use the troubleshooting checks below; motion firmware remains available.
 
 With the motor driver power cutoff within reach:
 
@@ -158,3 +166,18 @@ Do not add an unattended combination loop until all of these are true:
 The upstream project uses TMC5160 StallGuard during a carefully calibrated
 opening sweep. The TB-style driver has no equivalent telemetry; software cannot
 infer it from STEP and DIR alone.
+
+## OLED troubleshooting
+
+Keep the motor disarmed while changing or diagnosing the display wiring.
+
+| Symptom | Check |
+| --- | --- |
+| `OLED=MISSING` | Power off, verify the module's own pin labels lead to 5V, GND, SDA/A4, and SCL/A5; inspect for swapped SDA/SCL |
+| Still missing after wiring correction | Power the controller, issue `OLED RETRY`, then `STATUS`; the firmware checks both `0x3C` and `0x3D` |
+| `OLED=FAULT` | Disarm, inspect for a loose connector or a held-low I²C line, then issue `OLED RETRY` |
+| Screen works but motor timing changes | Stop testing and report it as a firmware defect; screen transfers are designed to occur only while stationary |
+| Screen text disagrees with the dial | Treat the screen as commanded state only; realign physically and use `SETPOS`, then investigate missed steps or slip |
+
+Also perform one supervised run with the OLED unplugged. Boot must report
+`OLED=MISSING`, and the unloaded one-turn serial test must still work normally.

@@ -9,11 +9,15 @@
 
 #include "DialMath.h"
 #include "HardwareConfig.h"
+#include "StatusDisplay.h"
 
 using wheelwrecker::CombinationPlan;
 using wheelwrecker::DialGeometry;
 using wheelwrecker::DialMove;
 using wheelwrecker::Direction;
+using wheelwrecker::DisplayHealth;
+using wheelwrecker::DisplaySnapshot;
+using wheelwrecker::StatusDisplay;
 
 namespace {
 
@@ -30,12 +34,14 @@ AccelStepper stepper(AccelStepper::DRIVER,
                      false);
 DialGeometry geometry(hardware::kStepsPerDialRevolution,
                       hardware::kDialUnitsPerRevolution);
+StatusDisplay statusDisplay;
 
 bool armed = false;
 bool positionKnown = false;
 bool motorEnabled = false;
 bool motorMoving = false;
 bool directionPinInverted = hardware::kDirectionPinInverted;
+bool displayDirty = true;
 
 float maxRevolutionsPerSecond = hardware::kMaxDialRevolutionsPerSecond;
 float accelerationRevolutionsPerSecondSquared =
@@ -54,6 +60,8 @@ size_t moveQueueCount = 0;
 size_t moveQueueIndex = 0;
 bool queueActive = false;
 char queueName[24] = "";
+DialMove activeMove = {Direction::Left, 0, 0, 0.0f, 0};
+bool activeMoveValid = false;
 
 char inputLine[kLineCapacity];
 size_t inputLength = 0;
@@ -82,9 +90,23 @@ void configureOutputLevel(uint8_t pin, bool outputHigh) {
   R_IOPORT_PinCfg(nullptr, digitalPinToBspPin(pin), configuration);
 }
 
+void printOledStatus() {
+  Serial.print(F("OLED="));
+  Serial.print(statusDisplay.healthName());
+  if (statusDisplay.health() == DisplayHealth::Ready) {
+    Serial.print(F("@0x"));
+    if (statusDisplay.address() < 0x10) {
+      Serial.print('0');
+    }
+    Serial.print(statusDisplay.address(), HEX);
+  }
+  Serial.println();
+}
+
 void setDriverEnabled(bool enabled) {
   if (!hardware::kEnablePinConnected) {
     motorEnabled = true;
+    displayDirty = true;
     return;
   }
 
@@ -92,6 +114,7 @@ void setDriverEnabled(bool enabled) {
       enabled ? hardware::kEnableOutputHigh : !hardware::kEnableOutputHigh;
   digitalWrite(hardware::kEnablePin, outputHigh ? HIGH : LOW);
   motorEnabled = enabled;
+  displayDirty = true;
 }
 
 void applyMotionRates() {
@@ -116,6 +139,8 @@ bool motionSettling() {
   }
   if (!deadlinePending(settleDeadline)) {
     settleDeadlineActive = false;
+    activeMoveValid = false;
+    displayDirty = true;
     return false;
   }
   return true;
@@ -133,11 +158,69 @@ void rebaseAt(int32_t wrappedStep) {
   stepper.setCurrentPosition(geometry.normalizeStep(wrappedStep));
 }
 
+DisplaySnapshot captureDisplaySnapshot() {
+  DisplaySnapshot snapshot = {
+      armed,
+      positionKnown,
+      hardware::kEnablePinConnected,
+      motorEnabled,
+      queueActive,
+      geometry.stepToMark(currentWrappedStep()),
+      geometry.stepsPerRevolution(),
+      queueName,
+      static_cast<uint8_t>(moveQueueIndex + 1),
+      static_cast<uint8_t>(moveQueueCount),
+      false,
+      Direction::Left,
+      0.0f,
+      0,
+  };
+
+  const DialMove* target = nullptr;
+  if (queueActive) {
+    if (activeMoveValid) {
+      target = &activeMove;
+    } else if (moveQueueIndex < moveQueueCount) {
+      target = &moveQueue[moveQueueIndex];
+    }
+  }
+  if (target != nullptr) {
+    snapshot.targetAvailable = true;
+    snapshot.targetDirection = target->direction;
+    snapshot.targetMark = target->targetMark;
+    snapshot.passesBeforeStop = target->passesBeforeStop;
+  }
+  return snapshot;
+}
+
+void serviceDisplay() {
+  if (!displayDirty || motorMoving || settleDeadlineActive) {
+    return;
+  }
+
+  // Let serviceQueue transition to DONE before painting the final idle frame.
+  if (queueActive && moveQueueIndex >= moveQueueCount) {
+    return;
+  }
+
+  displayDirty = false;
+  if (statusDisplay.health() != DisplayHealth::Ready) {
+    return;
+  }
+
+  if (!statusDisplay.render(captureDisplaySnapshot())) {
+    Serial.println(F("WARN: OLED stopped responding; motion remains available"));
+    Serial.println(F("DISARM, check wiring, then use OLED RETRY"));
+  }
+}
+
 void cancelQueue() {
   queueActive = false;
   moveQueueCount = 0;
   moveQueueIndex = 0;
   queueName[0] = '\0';
+  activeMoveValid = false;
+  displayDirty = true;
 }
 
 void immediateStop(const __FlashStringHelper* reason) {
@@ -164,8 +247,12 @@ bool startMotorMove(const DialMove& move) {
   }
 
   plannedDestinationStep = move.destinationStep;
+  activeMove = move;
+  activeMoveValid = true;
   if (move.deltaSteps == 0) {
     rebaseAt(plannedDestinationStep);
+    activeMoveValid = false;
+    displayDirty = true;
     return true;
   }
 
@@ -207,8 +294,12 @@ void serviceMotor() {
       rebaseAt(plannedDestinationStep);
       settleDeadline = millis() + targetSettleMillis;
       settleDeadlineActive = targetSettleMillis > 0;
+      if (!settleDeadlineActive) {
+        activeMoveValid = false;
+      }
       disableDeadline = millis() + idleDisableMillis;
       disableDeadlineActive = true;
+      displayDirty = true;
     }
   }
 
@@ -227,6 +318,7 @@ void serviceMotor() {
       }
       printPrompt();
     }
+    displayDirty = true;
   }
 }
 
@@ -244,6 +336,7 @@ bool startQueue(const DialMove* moves, size_t count, const char* name) {
   queueActive = true;
   strncpy(queueName, name, sizeof(queueName) - 1);
   queueName[sizeof(queueName) - 1] = '\0';
+  displayDirty = true;
 
   Serial.print(F("START "));
   Serial.print(queueName);
@@ -274,6 +367,7 @@ void serviceQueue() {
   cancelQueue();
   disableDeadline = millis() + idleDisableMillis;
   disableDeadlineActive = true;
+  displayDirty = true;
   printPrompt();
 }
 
@@ -385,6 +479,7 @@ void printHelp() {
   Serial.println(F("  SET SPEED <rev/sec> | SET ACCEL <rev/sec^2>"));
   Serial.println(F("  SET REVERSE <ON|OFF> | SET SETTLE <ms> | SET HOLD <ms>"));
   Serial.println(F("  CAL SCALE <commanded-revs> <observed-revs>"));
+  Serial.println(F("  OLED RETRY            restart I2C and retry OLED while disarmed"));
   Serial.println(F("LEFT increases printed numbers; RIGHT decreases them."));
 }
 
@@ -400,7 +495,11 @@ void printStatus() {
   Serial.print(F(" armed="));
   Serial.print(armed ? F("YES") : F("NO"));
   Serial.print(F(" driver="));
-  Serial.print(motorEnabled ? F("ON") : F("OFF"));
+  if (hardware::kEnablePinConnected) {
+    Serial.print(motorEnabled ? F("ON") : F("OFF REQUESTED"));
+  } else {
+    Serial.print(F("N/C (UNCONTROLLED)"));
+  }
   Serial.print(F(" position="));
   if (positionKnown) {
     Serial.print(geometry.stepToMark(currentWrappedStep()), 4);
@@ -422,6 +521,7 @@ void printStatus() {
   Serial.print(accelerationRevolutionsPerSecondSquared, 3);
   Serial.print(F(" rev/s^2 reverse="));
   Serial.println(directionPinInverted ? F("ON") : F("OFF"));
+  printOledStatus();
 }
 
 void handleSet(char* arguments[], size_t count) {
@@ -617,6 +717,20 @@ void handleLine(char* line) {
     return;
   }
 
+  if (strcmp(arguments[0], "OLED") == 0) {
+    if (count != 2 || strcmp(arguments[1], "RETRY") != 0) {
+      Serial.println(F("ERR: use OLED RETRY"));
+    } else if (armed) {
+      Serial.println(F("ERR: DISARM before retrying the OLED"));
+    } else {
+      statusDisplay.retry();
+      displayDirty = true;
+      printOledStatus();
+    }
+    printPrompt();
+    return;
+  }
+
   if (strcmp(arguments[0], "ARM") == 0) {
     armed = true;
     digitalWrite(LED_BUILTIN, HIGH);
@@ -761,6 +875,7 @@ void serviceSerial() {
       inputLength = 0;
       inputOverflow = false;
       immediateStop(F("Ctrl-C"));
+      displayDirty = true;
       printPrompt();
       continue;
     }
@@ -774,6 +889,7 @@ void serviceSerial() {
       } else {
         inputLine[inputLength] = '\0';
         handleLine(inputLine);
+        displayDirty = true;
       }
       inputLength = 0;
       inputOverflow = false;
@@ -817,6 +933,8 @@ void setup() {
     // Bounded wait: the motor remains disabled even without a serial host.
   }
 
+  statusDisplay.begin();
+
   Serial.println();
   Serial.println(F("Wheel Wrecker precision dial controller"));
   Serial.println(F("BOOT: no pulses scheduled, motion disarmed, position unknown"));
@@ -827,11 +945,18 @@ void setup() {
   }
   Serial.println(F("Use HELP. Verify wiring/DIP settings before ARM."));
   printStatus();
+  serviceDisplay();
   printPrompt();
 }
 
 void loop() {
   serviceMotor();
+  serviceSerial();
+  serviceMotor();
+  serviceDisplay();
+
+  // An OLED refresh is synchronous. Drain input once more before authorizing
+  // the next queued segment so STOP/Ctrl-C received during that refresh wins.
   serviceSerial();
   serviceMotor();
   serviceQueue();

@@ -8,6 +8,17 @@ constexpr uint8_t kStepPin = 2;
 constexpr uint8_t kDirectionPin = 3;
 constexpr uint8_t kEnablePin = 4;
 
+// Optional 128x64 SSD1306 status display on the UNO R4's main I2C bus:
+// SDA/A4 and SCL/A5. It is informational and never authorizes motion.
+constexpr bool kOledEnabled = true;
+constexpr uint8_t kOledWidth = 128;
+constexpr uint8_t kOledHeight = 64;
+constexpr uint8_t kOledPrimaryAddress = 0x3C;
+constexpr uint8_t kOledAlternateAddress = 0x3D;
+constexpr uint32_t kOledI2cClock = 400000;
+constexpr unsigned int kOledI2cTimeoutMicros = 25000;
+constexpr uint16_t kOledStartupDelayMillis = 50;
+
 // The photographed wiring appears to use common-anode STEP/DIR inputs:
 // PUL+/DIR+ -> +5 V and the Arduino sinks PUL-/DIR-. Confirm continuity.
 constexpr bool kStepPulseInverted = true;

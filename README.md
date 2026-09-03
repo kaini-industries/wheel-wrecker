@@ -1,11 +1,12 @@
 # Wheel Wrecker
 
-Wheel Wrecker is now a conservative precision-motion foundation for an
-owner-authorized safe-lock test fixture. It targets the photographed Arduino
-UNO R4 WiFi, 1.8° NEMA 23 motor, and STEP/DIR/ENA TB-style driver.
+Wheel Wrecker is a conservative precision-motion controller for an
+owner-authorized safe-lock test fixture. It targets an Arduino UNO R4 WiFi,
+1.8° NEMA 23 motor, STEP/DIR/ENA TB-style driver, and optional 128×64 SSD1306
+I²C status display.
 
 The firmware boots with no motion scheduled, ENA requesting offline,
-unreferenced, and disarmed. Reset-time ENA safety still requires the hardware
+unreferenced, and disarmed. Reset-time ENA safety requires the hardware
 pull-down documented in `HARDWARE.md`. A nonblocking motion loop keeps serial
 `STOP` or Ctrl-C responsive, integer microstep ticks model the 100-mark dial,
 and directed moves and conservative combination sequences are supported. It
@@ -14,17 +15,9 @@ does not run an unattended search without position and open-detection feedback.
 
 Only use this project on locks you own or have explicit permission to test.
 
-## Why the old sketch was inaccurate
+## Motion model
 
-The original build configuration targeted the classic AVR Uno rather than the
-UNO R4 WiFi. The sketch also treated AccelStepper `moveTo()` targets as relative
-moves. Its live targets were 1600, 3200, 4800, and 7200 steps; at 3200
-steps/revolution those produce relative moves of 1/2, 1/2, 1/2, and 3/4 of a
-turn, followed by a 1-3/4-turn reversal when the loop repeats. The `oneRev`
-constant was not used by that code path, and the configured speed and
-acceleration were high enough to make lost steps plausible.
-
-The replacement has one source of truth for geometry:
+The controller has one source of truth for dial geometry:
 
 ```text
 steps per dial revolution = 200 × microstep × motor-revs-per-dial-rev
@@ -39,6 +32,8 @@ steps and one of 100 dial marks is exactly 32 steps.
   timing defaults.
 - `include/DialMath.h` / `src/DialMath.cpp` — hardware-independent integer dial
   geometry and combination planning.
+- `include/StatusDisplay.h` / `src/StatusDisplay.cpp` — optional, fault-tolerant
+  OLED discovery and stationary status rendering.
 - `src/main.cpp` — UNO R4 motion service and fixed-buffer serial console.
 - `test/native/test_dial_math.cpp` — host tests for wraparound, quantization,
   direction, pass counts, and 4/3/2-arrival combination planning.
@@ -58,8 +53,11 @@ pio run --target upload
 pio device monitor --baud 115200
 ```
 
-The build target is `renesas-ra / uno_r4_wifi`. The current firmware build uses
-about 21% of flash and 10% of RAM on the RA4M1.
+The build target is `renesas-ra / uno_r4_wifi`. The OLED library versions are
+constrained in `platformio.ini`; PlatformIO installs them during the first
+build. The current firmware build uses about 29% of flash and 18% of statically
+allocated RAM on the RA4M1. The display library also allocates a 1,024-byte
+framebuffer at runtime when an OLED is detected.
 
 Run the hardware-independent tests with any C++11 compiler:
 
@@ -107,6 +105,7 @@ test. Make the verified value permanent in `HardwareConfig.h`.
 | `SET SETTLE <ms>` | Change the dwell after each target |
 | `SET HOLD <ms>` | Change how long ENA stays energized after a completed sequence |
 | `CAL SCALE <commanded> <observed>` | Calculate a trial SPR from a measured multi-turn ratio |
+| `OLED RETRY` | Restart I²C and re-probe the optional display while disarmed |
 
 Runtime settings are deliberately not saved. Once verified, update
 `HardwareConfig.h` so every power cycle starts from an auditable configuration.
@@ -114,6 +113,24 @@ When the HOLD timer releases motor torque, the firmware also invalidates its
 position reference; run `SETPOS` again before the next move. Issue the next
 command before HOLD expires or lengthen HOLD during a supervised sequence if
 you need continuity between commands.
+
+## OLED status display
+
+The display is a local view of the same commanded state available over serial.
+It automatically probes the usual SSD1306 I²C addresses, `0x3C` then `0x3D`,
+and the `STATUS` command reports `OLED=READY@0x..`, `MISSING`, `FAULT`, or
+`DISABLED`. A missing or failed display never blocks motion commands.
+
+The large `CMD REF` value is an open-loop command reference, not encoder
+feedback. Likewise, `ENA:OFF?` means the firmware requested the driver's
+offline input; the Arduino cannot confirm the driver's electrical state. It
+shows `ENA:N/C` when enable control is configured as disconnected. OLED updates
+are held until the motor and target-settle interval are both stopped so an I²C
+frame transfer cannot introduce gaps in STEP pulse service. Serial input is
+serviced again after each refresh, before the next queued move may start.
+
+See `HARDWARE.md` for label-to-label wiring. The connector pin order and wire
+colors could not be verified from the project photos.
 
 ## Combination semantics
 
@@ -134,12 +151,11 @@ driver provides no load feedback and the opening direction/travel varies by
 lock. Prove the sequence on a transparent or known-combination test lock before
 using it on any closed container.
 
-## Reference project
+## Related project
 
-The linked [LockManipulator Auto Dialer](https://github.com/LockManipulator/Locksport/tree/main/Safe%20manipulation/Auto%20Dialer)
-informed the coordinate model and highlighted the importance of controlled
-acceleration and explicit wheel direction. Its implementation is for an
-ESP32-S3 plus TMC5160 and uses that driver's StallGuard feature for opening
-detection, so it is not directly portable to this UNO R4 plus TB-style driver.
-Its source is under the PolyForm Noncommercial 1.0.0 license. This repository's
-replacement is an independent implementation rather than a copied port.
+The [LockManipulator Auto Dialer](https://github.com/LockManipulator/Locksport/tree/main/Safe%20manipulation/Auto%20Dialer)
+is a related design built around an ESP32-S3 and TMC5160. It uses that driver's
+StallGuard feature for opening detection. Wheel Wrecker instead targets the UNO
+R4 and a basic STEP/DIR/ENA driver, so it does not have equivalent load or stall
+feedback. The related project's source is licensed under PolyForm
+Noncommercial 1.0.0.
