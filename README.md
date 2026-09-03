@@ -26,6 +26,158 @@ steps per dial revolution = 200 × microstep × motor-revs-per-dial-rev
 At the default 1/16 setting with a direct coupler, one dial revolution is 3200
 steps and one of 100 dial marks is exactly 32 steps.
 
+## Hardware
+
+The hardware configuration is based on the photographed build and the
+user-reported OLED installation. Treat the labels on the physical parts as
+authoritative: generic driver listings and the originally saved motor listing
+do not exactly identify every installed part. See [`HARDWARE.md`](HARDWARE.md)
+for the full electrical notes and [`docs/COMMISSIONING.md`](docs/COMMISSIONING.md)
+for the staged bring-up procedure.
+
+### Installed components
+
+| Component | Hardware in this build | Role and constraints |
+| --- | --- | --- |
+| Controller | Arduino UNO R4 WiFi | RA4M1 controller with 5 V GPIO; the firmware is R4-WiFi-specific and rejects a classic Uno or R4 Minima |
+| Motor driver | Generic upgraded TB-style microstep driver, 9–42 V, 4 A peak | Accepts only PUL/DIR/ENA commands; it provides no encoder, stall/load telemetry, or usable fault feedback |
+| Stepper motor | `57HS8030A4D8`, 1.8°, 3 A | 200 full steps per revolution; the photographed label gives black A+, green A−, red B+, and blue B− |
+| Motor supply | `S-350-24`, 24 V, 14.6 A, 350 W | Considerably larger than one motor branch requires; it needs branch protection and a covered, properly earthed enclosure |
+| Status display | ideaspark 0.96-inch, 128×64 SSD1306 OLED with protector case | Four-pin I²C display used for informational status only; serial operation continues if it is missing |
+| Mechanical drive | Motor-to-dial coupler | Firmware currently assumes direct 1:1 drive; measure and configure any gear or belt ratio before relying on dial positions |
+
+Reference listings: [power supply](https://www.amazon.com/dp/B0DSK3XN1M),
+[driver](https://www.amazon.com/dp/B0DSJ53J9N), and
+[OLED display](https://www.amazon.com/dp/B0F8HRSF31). The
+[original motor listing](https://www.amazon.com/dp/B091C37FJ2) describes a
+different 4 A motor and must not be used to choose the installed motor's
+current setting.
+
+### Motor-driver DIP switches
+
+Disconnect both USB and 24 V power and wait for the indicators to go dark
+before changing a DIP switch or motor lead. On the photographed driver's red
+switch block, **ON is down**, toward the switch numbers and the `ON ↓` legend.
+Do not copy the old photographed positions; deliberately set all six switches
+to this initial uncoupled-test pattern:
+
+| Switch | S1 | S2 | S3 | S4 | S5 | S6 |
+| --- | --- | --- | --- | --- | --- | --- |
+| State | OFF | OFF | ON | ON | OFF | ON |
+| Lever | ↑ | ↑ | ↓ | ↓ | ↑ | ↓ |
+
+S1–S3 select 1/16 microstepping, giving 3,200 input pulses per motor
+revolution. S4–S6 select the driver's 1.0 A nominal / 1.2 A peak row, which is
+the low-current starting point for an uncoupled motor. If the final mechanism
+needs more torque, increase current only one labeled row at a time while
+checking for missed steps and monitoring motor and driver temperature. The
+2.8 A row is a conservative ceiling near the photographed motor's 3 A rating,
+not a starting setting. Use the table printed on this exact driver because DIP
+patterns are not interchangeable among visually similar TB-style modules.
+
+With a 1.8° motor, 1/16 microstepping, and a direct coupler, the matching
+firmware value is:
+
+```text
+200 full steps/rev × 16 microsteps × 1:1 drive = 3200 pulses/dial rev
+3200 pulses/dial rev ÷ 100 dial marks = 32 pulses/mark
+```
+
+The persistent value is `kStepsPerDialRevolution` in
+[`HardwareConfig.h`](arduino/WheelWrecker/HardwareConfig.h). `SET SPR` is only
+a temporary calibration aid for the current boot; it does not save a setting.
+
+### Arduino-to-driver signals
+
+The current firmware configuration assumes the common-anode wiring likely
+shown in the photos:
+
+| Arduino UNO R4 WiFi | Driver terminal | Purpose |
+| --- | --- | --- |
+| `5V` | `PUL+` | STEP opto-input supply |
+| `D2` | `PUL−` | Active-low STEP pulse |
+| `5V` | `DIR+` | Direction opto-input supply |
+| `D3` | `DIR−` | Direction signal |
+| `5V` | `ENA+` | Optional enable/offline opto-input supply |
+| `D4` | `ENA−` | HIGH requests enabled; LOW requests offline with the current polarity settings |
+
+Verify every terminal label and endpoint before applying power; wire color is
+not evidence of a signal. The UNO R4 WiFi GPIO current limit is 8 mA, so verify
+the clone driver's opto-input current or use a suitable transistor/open-
+collector buffer. For reset-time safety, the common-anode ENA− arrangement
+also needs a bench-tested external pull-down so the driver remains offline
+while D4 is high impedance. The unknown input circuit prevents specifying a
+reliable resistor value from the case label alone.
+
+If ENA is not wired, set `kEnablePinConnected = false` in
+[`HardwareConfig.h`](arduino/WheelWrecker/HardwareConfig.h). In that mode,
+`STOP` prevents further step pulses but cannot remove motor holding torque. If
+the driver is wired common-cathode instead, update the STEP and ENA polarity
+constants rather than changing the steps-per-revolution value.
+
+### Motor and power wiring
+
+The photographed motor label gives this phase mapping:
+
+| Motor lead | Driver output |
+| --- | --- |
+| Black | `A+` |
+| Green | `A−` |
+| Red | `B+` |
+| Blue | `B−` |
+
+Connect the 24 V supply only to the motor driver's DC input. Do not feed 24 V
+into the Arduino `5V` pin; power the controller over USB-C or from an
+appropriately regulated converter. Never connect or disconnect the motor, move
+a DIP switch, or touch the power wiring while energized.
+
+The photographed mains supply has exposed high-energy terminals and must not
+be operated in that state. Before commissioning it, provide an appropriate
+enclosure, terminal cover, protective-earth bond, mains-voltage selector
+check, strain relief, switch, and fused motor branch. Keep a physical motor-
+power cutoff within reach. Firmware `STOP` is an operational stop, not an
+emergency stop or a substitute for disconnecting power.
+
+### OLED connection
+
+Read the actual display's silk-screened pin order before wiring it; four-pin
+SSD1306 boards do not all arrange their pins alike.
+
+| OLED label | Arduino UNO R4 WiFi | Notes |
+| --- | --- | --- |
+| `VCC` | `5V` | The listing specifies 3.3–5 V operation; verify the installed board marking |
+| `GND` | `GND` | Keep motor return current out of this lead |
+| `SDA` | `SDA` / `A4` | Main `Wire` bus data |
+| `SCL` | `SCL` / `A5` | Main `Wire` bus clock |
+
+`SDA`/`A4` and `SCL`/`A5` are duplicate labels for the same two signals, so
+use only one connection for each. The UNO R4 WiFi Qwiic connector uses the
+separate 3.3 V `Wire1` bus and is not used by this firmware. D4 is reserved for
+driver ENA and must not be used for the display.
+
+At startup the firmware probes SSD1306 addresses `0x3C` and `0x3D`. A missing
+display produces `OLED=MISSING` but does not disable serial control. The OLED
+shows commanded state—not measured shaft position, confirmed driver state, or
+proof that the lock opened—and therefore is not a safety indicator.
+
+### Open-loop limitations and planned feedback
+
+This hardware can count STEP commands, but it cannot observe missed steps,
+coupler slip, absolute dial position after reset, or an opened lock. Manual
+`SETPOS` is required after startup, `STOP`, `DISARM`, or automatic torque
+release. Unattended searching remains intentionally disabled.
+
+Reliable autonomous operation requires dial-side position feedback, preferably
+an absolute encoder or at least a repeatable optical/Hall index, plus an
+independent opening detector such as a handle/bolt contact or carefully limited
+load sensing. A load-aware driver such as the reference project's TMC5160 would
+be a hardware change; the installed PUL/DIR/ENA driver cannot gain that
+telemetry through firmware alone.
+
+Complete the motor-power-off and uncoupled tests in
+[`docs/COMMISSIONING.md`](docs/COMMISSIONING.md) before attaching the motor to
+a dial or lock.
+
 ## Project layout
 
 - `arduino/WheelWrecker/WheelWrecker.ino` — the sketch to open in Arduino IDE.
