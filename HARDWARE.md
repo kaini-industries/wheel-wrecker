@@ -83,9 +83,10 @@ pulses per dial revolution
 3200 pulses / 100 dial marks = 32 pulses per mark
 ```
 
-Change `kStepsPerDialRevolution` in `include/HardwareConfig.h` if the physical
-DIP setting or transmission ratio differs. The `SET SPR` serial command is a
-runtime-only way to test a value.
+Change `kStepsPerDialRevolution` in
+`arduino/WheelWrecker/HardwareConfig.h` if the physical DIP setting or
+transmission ratio differs. The `SET SPR` serial command is a runtime-only way
+to test a value.
 
 ## Signal wiring assumed by the firmware
 
@@ -104,8 +105,8 @@ powering the driver; wire colors alone are not evidence.
 
 If ENA is disconnected, set `kEnablePinConnected = false`. If using a
 common-cathode topology instead, change the STEP and ENA polarity constants in
-`include/HardwareConfig.h`; do not try to correct an electrical polarity error
-by changing the steps-per-revolution value.
+`arduino/WheelWrecker/HardwareConfig.h`; do not try to correct an electrical
+polarity error by changing the steps-per-revolution value.
 
 Add an external pull-down from ENA− to controller ground for this common-anode
 topology. It keeps the driver's offline input asserted while D4 is high

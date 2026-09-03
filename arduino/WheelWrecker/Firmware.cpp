@@ -1,4 +1,9 @@
 #include <Arduino.h>
+
+#if !defined(ARDUINO_UNOR4_WIFI)
+#error "Wheel Wrecker requires Arduino UNO R4 WiFi. Select it under Tools > Board."
+#endif
+
 #include <AccelStepper.h>
 
 #include <ctype.h>
@@ -8,6 +13,7 @@
 #include <string.h>
 
 #include "DialMath.h"
+#include "Firmware.h"
 #include "HardwareConfig.h"
 #include "StatusDisplay.h"
 
@@ -906,7 +912,7 @@ void serviceSerial() {
 
 }  // namespace
 
-void setup() {
+void wheelWreckerSetup() {
   pinMode(LED_BUILTIN, OUTPUT);
   digitalWrite(LED_BUILTIN, LOW);
 
@@ -949,7 +955,7 @@ void setup() {
   printPrompt();
 }
 
-void loop() {
+void wheelWreckerLoop() {
   serviceMotor();
   serviceSerial();
   serviceMotor();

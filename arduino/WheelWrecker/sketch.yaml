@@ -1,0 +1,12 @@
+default_profile: uno_r4_wifi
+
+profiles:
+  uno_r4_wifi:
+    fqbn: arduino:renesas_uno:unor4wifi
+    platforms:
+      - platform: arduino:renesas_uno (1.6.0)
+    libraries:
+      - AccelStepper (1.64)
+      - Adafruit BusIO (1.17.4)
+      - Adafruit GFX Library (1.12.6)
+      - Adafruit SSD1306 (2.5.17)

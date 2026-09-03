@@ -12,7 +12,8 @@ changing one `stepsPerRevolution` number cannot fix all of them.
 3. Read the installed motor label. The photographed unit is 1.8° and 3 A; it is
    not the 4 A motor in the original product link.
 4. With all power disconnected, use continuity mode to identify PUL, DIR, and
-   ENA endpoints. Confirm they match `include/HardwareConfig.h`.
+   ENA endpoints. Confirm they match
+   `arduino/WheelWrecker/HardwareConfig.h`.
 5. Install the ENA− pull-down described in `HARDWARE.md`, and verify that the
    driver is offline during controller reset. A serial stop is not a substitute
    for the physical motor-power cutoff.
@@ -25,12 +26,52 @@ changing one `stepsPerRevolution` number cannot fix all of them.
 8. Remove the motor-to-dial coupler. Mark the motor shaft and housing so full
    revolutions are easy to count.
 
-## 2. Unloaded direction and one-turn test
+## 2. Compile, upload, and test interlocks
 
-Power the Arduino by USB and open a 115200-baud serial monitor. On every boot it
-must report `ENA offline requested`, `motion disarmed`, and `position unknown`.
-With the OLED attached, `STATUS` should also report `OLED=READY@0x3C` or
-`OLED=READY@0x3D`, and the screen should show `DISARMED`, `ENA:OFF?`, and
+Keep the 24 V motor supply disconnected and the motor-to-dial coupler removed.
+Follow [`ARDUINO_IDE.md`](ARDUINO_IDE.md) to install the pinned UNO R4 core and
+libraries, open `arduino/WheelWrecker/WheelWrecker.ino`, verify it, and upload
+it through Arduino IDE.
+
+Open Serial Monitor at `115200` baud with **New Line** selected and press RESET.
+Every boot must report `ENA offline requested`, `motion disarmed`, and
+`position unknown`. With the OLED attached, `STATUS` should report
+`OLED=READY@0x3C` or `OLED=READY@0x3D`; a missing OLED is nonfatal.
+
+With motor power still disconnected, verify the command gates:
+
+```text
+STATUS
+TURN L 1
+ARM
+TURN L 1
+DISARM
+OLED RETRY
+```
+
+The first `TURN` must be rejected because motion is disarmed. After `ARM`, the
+second `TURN` must be rejected because position is unknown. `DISARM` must leave
+the driver-off state requested and the position unknown.
+
+Then exercise cancellation without motor power:
+
+```text
+SETPOS 0
+ARM
+TURN L 10
+STOP
+STATUS
+```
+
+Send `STOP` while the command is active. The controller must stop scheduling
+pulses, cancel the sequence, disarm, request driver-off, and invalidate its
+position. Use the text command for this check because some serial terminals
+intercept Ctrl-C. Correct any failure before energizing the motor driver.
+
+## 3. Unloaded direction and one-turn test
+
+Power the Arduino by USB first and confirm the safe boot state again. With the
+OLED attached, the screen should show `DISARMED`, `ENA:OFF?`, and
 `CMD REF UNKNOWN`. If it reports `OLED=MISSING`, leave the motor disarmed and
 use the troubleshooting checks below; motion firmware remains available.
 
@@ -54,8 +95,9 @@ TURN L 1
 ```
 
 Once confirmed, make the direction setting permanent with
-`kDirectionPinInverted` in `HardwareConfig.h`. Do not swap one lead of a motor
-phase; reverse either a complete phase pair or the DIR polarity.
+`kDirectionPinInverted` in `arduino/WheelWrecker/HardwareConfig.h`. Do not swap
+one lead of a motor phase; reverse either a complete phase pair or the DIR
+polarity.
 
 The default HOLD timer requests driver-off two seconds after a completed
 sequence and then invalidates the software position. If that happens between
@@ -67,7 +109,7 @@ If the shaft moves 1/2, 1/4, 2, or 4 turns instead of one, the DIP microstep
 setting and firmware SPR do not agree. Correct the DIP/configuration mismatch;
 do not use an arbitrary empirical value to hide it.
 
-## 3. Multi-turn scale and return test
+## 4. Multi-turn scale and return test
 
 Run ten slow turns in each direction and count the shaft marks:
 
@@ -100,11 +142,11 @@ new SPR = old SPR × commanded revolutions / observed revolutions
 ```
 
 The command invalidates position and lasts only until reset. Re-test, then put
-the derived mechanical value in `HardwareConfig.h`. A direct-coupled stepper
-should normally use the exact DIP-derived value, not a correction for random
-error.
+the derived mechanical value in `arduino/WheelWrecker/HardwareConfig.h`. A
+direct-coupled stepper should normally use the exact DIP-derived value, not a
+correction for random error.
 
-## 4. Dial-side test
+## 5. Dial-side test
 
 Attach the coupler to a visible, unloaded dial or printed 0–99 test wheel. Keep
 the driver current low.
@@ -127,7 +169,7 @@ Increase speed gradually only after repeatability is proven under the final
 load. The defaults are 0.30 dial rev/s maximum and 0.50 dial rev/s². A heavier
 wheel pack benefits from slower acceleration and a longer target settle dwell.
 
-## 5. Known-combination fixture test
+## 6. Known-combination fixture test
 
 Use a transparent practice lock or an open, known-combination lock where wheel
 pickup can be observed. Confirm the lock's first direction; it is not universal.
@@ -150,7 +192,7 @@ The firmware then stops. Operate the opening step manually. Do not command the
 stepper hard into the lock's contact point: the current driver cannot sense
 load or know when to stop.
 
-## 6. Conditions for autonomous searching
+## 7. Conditions for autonomous searching
 
 Do not add an unattended combination loop until all of these are true:
 

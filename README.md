@@ -28,36 +28,87 @@ steps and one of 100 dial marks is exactly 32 steps.
 
 ## Project layout
 
-- `include/HardwareConfig.h` — pin polarity, steps/revolution, speed, and safety
-  timing defaults.
-- `include/DialMath.h` / `src/DialMath.cpp` — hardware-independent integer dial
-  geometry and combination planning.
-- `include/StatusDisplay.h` / `src/StatusDisplay.cpp` — optional, fault-tolerant
-  OLED discovery and stationary status rendering.
-- `src/main.cpp` — UNO R4 motion service and fixed-buffer serial console.
+- `arduino/WheelWrecker/WheelWrecker.ino` — the sketch to open in Arduino IDE.
+- `arduino/WheelWrecker/Firmware.h` and `Firmware.cpp` — UNO R4 motion service
+  and fixed-buffer serial console.
+- `arduino/WheelWrecker/HardwareConfig.h` — pin polarity, steps/revolution,
+  speed, and safety timing defaults.
+- `arduino/WheelWrecker/DialMath.h` and `DialMath.cpp` — hardware-independent
+  integer dial geometry and combination planning.
+- `arduino/WheelWrecker/StatusDisplay.h` and `StatusDisplay.cpp` — optional,
+  fault-tolerant OLED discovery and stationary status rendering.
+- `arduino/WheelWrecker/sketch.yaml` — reproducible Arduino CLI board and
+  library profile.
 - `test/native/test_dial_math.cpp` — host tests for wraparound, quantization,
   direction, pass counts, and 4/3/2-arrival combination planning.
 - `HARDWARE.md` — observed parts, wiring assumptions, DIP settings, and power
   safety checks.
+- `docs/ARDUINO_IDE.md` — detailed Arduino IDE setup, upload, smoke test, and
+  troubleshooting.
 - `docs/COMMISSIONING.md` — staged bring-up and calibration procedure.
 - `docs/ARCHITECTURE.md` — coordinate/state invariants and feedback extension
   points.
 
-## Build
+All firmware implementations live in the Arduino sketch directory. Arduino
+IDE, Arduino CLI, and PlatformIO compile those same files; there is no second
+copy to synchronize.
 
-Install PlatformIO, then run:
+## Arduino IDE quick start
+
+Before connecting USB, turn off and disconnect the 24 V motor supply and remove
+the motor-to-dial coupler. Upload and test the software interlocks before
+energizing the driver.
+
+1. In Arduino IDE 2, choose **File > Open** and open
+   `arduino/WheelWrecker/WheelWrecker.ino` from this checkout. Do not copy or
+   rename the individual tabs.
+2. In **Tools > Board > Boards Manager**, install **Arduino UNO R4 Boards**
+   version `1.6.0`.
+3. Select **Tools > Board > Arduino UNO R4 Boards > Arduino UNO R4 WiFi**.
+4. In **Tools > Manage Libraries**, install these known-good versions:
+
+   - **AccelStepper** by Mike McCauley, `1.64`
+   - **Adafruit GFX Library**, `1.12.6`
+   - **Adafruit SSD1306**, `2.5.17`
+   - **Adafruit BusIO**, `1.17.4`
+
+5. Connect the UNO R4 WiFi by a data-capable USB-C cable and select its port.
+6. Click **Verify**, then **Upload**.
+7. Open **Tools > Serial Monitor**, select `115200` baud and **New Line**, then
+   press RESET once. Confirm that boot reports motion disarmed, position
+   unknown, and ENA offline requested before issuing any commands.
+
+Continue with the motor-power-off smoke test in
+[`docs/ARDUINO_IDE.md`](docs/ARDUINO_IDE.md), then use the complete staged
+procedure in [`docs/COMMISSIONING.md`](docs/COMMISSIONING.md). A classic Arduino
+Uno is not compatible; the sketch intentionally rejects the wrong board at
+compile time.
+
+## Other build and test paths
+
+The checked-in Arduino profile provides a clean command-line build with the
+pinned core and library versions:
 
 ```sh
-pio run
+arduino-cli compile --profile uno_r4_wifi arduino/WheelWrecker
+```
+
+PlatformIO remains available for warnings and automated verification:
+
+```sh
+make build
 pio run --target upload
 pio device monitor --baud 115200
 ```
 
-The build target is `renesas-ra / uno_r4_wifi`. The OLED library versions are
-constrained in `platformio.ini`; PlatformIO installs them during the first
-build. The current firmware build uses about 29% of flash and 18% of statically
-allocated RAM on the RA4M1. The display library also allocates a 1,024-byte
-framebuffer at runtime when an OLED is detected.
+The PlatformIO build target is `renesas-ra / uno_r4_wifi` and compiles the same
+`arduino/WheelWrecker` sources used by Arduino IDE. The known-good dependencies
+are pinned in both `platformio.ini` and `sketch.yaml`. With those versions,
+PlatformIO reports 76,480 bytes of flash and 5,952 bytes of static RAM; Arduino
+CLI reports about 90.7 KB and 9,844 bytes respectively. Both fit the RA4M1, and
+the build systems link and account for the core differently. The display
+library also allocates a 1,024-byte framebuffer at runtime when an OLED is
+detected.
 
 Run the hardware-independent tests with any C++11 compiler:
 
@@ -82,7 +133,8 @@ STATUS
 Motion directions follow safe-dial convention: `LEFT`/`L`/`CCW` increases the
 printed dial number; `RIGHT`/`R`/`CW` decreases it. If the unloaded motor moves
 the wrong physical way, stop, set `SET REVERSE ON`, realign it, and repeat the
-test. Make the verified value permanent in `HardwareConfig.h`.
+test. Make the verified value permanent in
+`arduino/WheelWrecker/HardwareConfig.h`.
 
 ### Commands
 
@@ -108,7 +160,8 @@ test. Make the verified value permanent in `HardwareConfig.h`.
 | `OLED RETRY` | Restart I²C and re-probe the optional display while disarmed |
 
 Runtime settings are deliberately not saved. Once verified, update
-`HardwareConfig.h` so every power cycle starts from an auditable configuration.
+`arduino/WheelWrecker/HardwareConfig.h` so every power cycle starts from an
+auditable configuration.
 When the HOLD timer releases motor torque, the firmware also invalidates its
 position reference; run `SETPOS` again before the next move. Issue the next
 command before HOLD expires or lengthen HOLD during a supervised sequence if

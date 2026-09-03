@@ -1,5 +1,23 @@
 # Firmware architecture and invariants
 
+## Source and build model
+
+`arduino/WheelWrecker` is the single canonical firmware source tree. The
+`WheelWrecker.ino` entry point contains only Arduino's `setup()` and `loop()`
+adapters; they delegate to `wheelWreckerSetup()` and `wheelWreckerLoop()` in
+`Firmware.cpp`. Controller logic therefore remains ordinary C++ instead of
+being duplicated in an IDE-specific sketch.
+
+Arduino IDE, the pinned Arduino CLI profile in `sketch.yaml`, and PlatformIO
+all compile these same files. `DialMath.cpp` is also compiled into the native
+host tests. A change must not be copied between build-system directories: if a
+source file exists outside the canonical sketch, it is test or build support,
+not another firmware implementation.
+
+The sketch rejects non-UNO-R4-WiFi targets at compile time. This matters because
+the pin behavior, memory budget, and main `Wire` bus assumptions are specific
+to the UNO R4 WiFi, not the classic AVR Uno or another Arduino board.
+
 ## Coordinate model
 
 `DialGeometry` is independent of Arduino and treats one dial revolution as an
