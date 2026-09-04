@@ -68,6 +68,23 @@ pulses, cancel the sequence, disarm, request driver-off, and invalidate its
 position. Use the text command for this check because some serial terminals
 intercept Ctrl-C. Correct any failure before energizing the motor driver.
 
+Still with 24 V motor power disconnected, repeat the cancellation check with
+the bounded demonstration:
+
+```text
+SETPOS 0
+ARM
+DEMO L 4
+STOP
+```
+
+`DEMO L 4` begins the candidates `(0,0,0)`, `(0,0,25)`, `(0,0,50)`, and
+`(0,0,75)`, with normal fourth/third/second-arrival dialing for each candidate.
+Send `STOP` while it is active. The entire demonstration must be canceled and
+the controller must again disarm, request driver-off, and invalidate position.
+This run checks scheduling and cancellation only because the driver is
+unpowered.
+
 ## 3. Unloaded direction and one-turn test
 
 Power the Arduino by USB first and confirm the safe boot state again. With the
@@ -146,6 +163,31 @@ the derived mechanical value in `arduino/WheelWrecker/HardwareConfig.h`. A
 direct-coupled stepper should normally use the exact DIP-derived value, not a
 correction for random error.
 
+After the one-turn, return, and scale checks pass, exercise the demonstration
+with the motor still uncoupled. Keep the physical cutoff within reach and start
+with only four candidates:
+
+```text
+SETPOS 0
+ARM
+DEMO L 4
+STOP
+```
+
+Observe smooth direction changes and consistent stops at the expected shaft
+marks. Send `STOP` during the run once to verify cancellation under motor power.
+A stop invalidates position, so physically realign and issue `SETPOS` before
+any subsequent motion. Do not increase the count until this supervised check is
+repeatable.
+
+Also verify cancellation during the target-settle state. Set an exaggerated
+settle interval with `SET SETTLE 5000`, start `DEMO L 1`, and send `STOP` during
+the five-second pause after a leg stops. Restore the default with
+`SET SETTLE 150` or reset the board before continuing. On a normal demo
+completion, the controller remains armed and follows the ordinary `HOLD`
+timer; `HOLD` expiry requests driver-off and invalidates position. Use
+`DISARM` when testing is finished.
+
 ## 5. Dial-side test
 
 Attach the coupler to a visible, unloaded dial or printed 0–99 test wheel. Keep
@@ -168,6 +210,12 @@ resolution is not the same as guaranteed mechanical accuracy.
 Increase speed gradually only after repeatability is proven under the final
 load. The defaults are 0.30 dial rev/s maximum and 0.50 dial rev/s². A heavier
 wheel pack benefits from slower acceleration and a longer target settle dwell.
+
+After the individual `GOTO` checks pass, `DEMO L 4` may be repeated on this
+unloaded visible dial. Supervise the full run, keep the cutoff within reach,
+and compare every commanded stop with the physical index. Do not use the
+demonstration on a closed container: it neither operates a handle nor detects
+an opening.
 
 ## 6. Known-combination fixture test
 
@@ -194,7 +242,10 @@ load or know when to stop.
 
 ## 7. Conditions for autonomous searching
 
-Do not add an unattended combination loop until all of these are true:
+`DEMO` is not an autonomous search. It only dials the requested prefix of 64
+coarse-grid candidates over `{0,25,50,75}` and has no handle actuation or open
+detection. Do not add an unattended combination loop until all of these are
+true:
 
 - A dial-side encoder or index verifies that commanded motion actually occurred.
 - An independent sensor reliably identifies the open state.

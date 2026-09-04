@@ -122,6 +122,43 @@ request driver-off, and mark position unknown. Type the textual command and
 press Enter; some terminal software intercepts Ctrl-C instead of sending it to
 the board.
 
+Still with 24 V motor power disconnected, check the bounded demonstration and
+its cancellation path:
+
+```text
+SETPOS 0
+ARM
+DEMO L 4
+STOP
+```
+
+`DEMO L 4` starts the first four three-wheel candidates over
+`{0,25,50,75}`—`(0,0,0)`, `(0,0,25)`, `(0,0,50)`, and `(0,0,75)`—with the last
+number changing fastest. Each candidate uses normal fourth/third/second-arrival
+combination motion. Send `STOP` before it finishes and confirm that it cancels
+the entire demonstration, disarms, requests driver-off, and invalidates the
+position reference. This unpowered check validates command handling and
+cancellation; it cannot validate physical motion.
+
+Restore the position reference and arming state, then check the parser limits:
+
+```text
+SETPOS 0
+ARM
+DEMO L 0
+DEMO L 65
+DEMO X 1
+DEMO L 1.5
+```
+
+Each `DEMO` line must be rejected without starting a sequence. Finally, run
+`DEMO R 2` to completion. Confirm the serial log advances from candidate 1 to
+2, the OLED (if present) advances from `DEMO 1/2 1/3` through
+`DEMO 2/2 3/3`, and an immediate prompt follows `DONE DEMO count=2`. Normal
+completion leaves the controller armed and starts the configured `HOLD` timer.
+At expiry it reports the driver-off request, invalidates the position
+reference, and prints a fresh prompt. Issue `DISARM` when the check is complete.
+
 Do not energize the driver if any safety gate or stop behavior differs from
 these expectations. Continue with the uncoupled motor procedure in
 [`COMMISSIONING.md`](COMMISSIONING.md) only after this test passes.
@@ -135,7 +172,7 @@ From the repository root:
 arduino-cli compile --profile uno_r4_wifi arduino/WheelWrecker
 ```
 
-The tested Arduino CLI build reports about 90.7 KB (34%) of flash and 9,844
+The tested Arduino CLI build reports 91,688 bytes (34%) of flash and 9,852
 bytes (30%) of static RAM. With `--warnings all`, core version `1.6.0` emits
 some warnings from its own `Wire`, interrupt, and USB sources; the Wheel Wrecker
 sources compile without warnings and the build completes successfully.

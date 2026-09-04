@@ -298,6 +298,120 @@ void testCombinationPlans() {
                       "rejected non-finite combination has no moves");
 }
 
+void expectDemoCandidate(size_t candidateIndex,
+                         float first,
+                         float second,
+                         float third,
+                         const char* label) {
+  float marks[wheelwrecker::kDemoCombinationWheels] = {-1.0f, -1.0f, -1.0f};
+  expectTrue(wheelwrecker::demoCandidateAt(
+                 candidateIndex, marks, wheelwrecker::kDemoCombinationWheels),
+             label);
+  expectNear(first, marks[0], 1e-6, label);
+  expectNear(second, marks[1], 1e-6, label);
+  expectNear(third, marks[2], 1e-6, label);
+}
+
+void testDemoCandidates() {
+  expectEqual<size_t>(3, wheelwrecker::kDemoCombinationWheels,
+                      "demo wheel count");
+  expectEqual<size_t>(4, wheelwrecker::kDemoGridMarkCount,
+                      "demo grid mark count");
+  expectEqual<size_t>(64, wheelwrecker::kDemoCandidateCount,
+                      "demo candidate count");
+
+  expectDemoCandidate(0, 0.0f, 0.0f, 0.0f, "demo candidate 0");
+  expectDemoCandidate(1, 0.0f, 0.0f, 25.0f, "demo candidate 1");
+  expectDemoCandidate(3, 0.0f, 0.0f, 75.0f, "demo candidate 3");
+  expectDemoCandidate(4, 0.0f, 25.0f, 0.0f, "demo candidate 4");
+  expectDemoCandidate(15, 0.0f, 75.0f, 75.0f, "demo candidate 15");
+  expectDemoCandidate(16, 25.0f, 0.0f, 0.0f, "demo candidate 16");
+  expectDemoCandidate(63, 75.0f, 75.0f, 75.0f, "demo candidate 63");
+
+  float marks[wheelwrecker::kDemoCombinationWheels] = {
+      -1.0f, -2.0f, -3.0f};
+  expectTrue(!wheelwrecker::demoCandidateAt(
+                 wheelwrecker::kDemoCandidateCount, marks,
+                 wheelwrecker::kDemoCombinationWheels),
+             "reject demo candidate past end");
+  expectNear(-1.0, marks[0], 1e-6, "bad index preserves first output");
+  expectNear(-2.0, marks[1], 1e-6, "bad index preserves second output");
+  expectNear(-3.0, marks[2], 1e-6, "bad index preserves third output");
+
+  expectTrue(!wheelwrecker::demoCandidateAt(
+                 0, nullptr, wheelwrecker::kDemoCombinationWheels),
+             "reject null demo output");
+
+  expectTrue(!wheelwrecker::demoCandidateAt(
+                 0, marks, wheelwrecker::kDemoCombinationWheels - 1),
+             "reject undersized demo output");
+  expectNear(-1.0, marks[0], 1e-6, "small output preserves first value");
+  expectNear(-2.0, marks[1], 1e-6, "small output preserves second value");
+  expectNear(-3.0, marks[2], 1e-6, "small output preserves third value");
+
+  bool seen[wheelwrecker::kDemoCandidateCount] = {};
+  const DialGeometry geometry(3200, 100.0f);
+  int32_t cursor = 0;
+  for (size_t candidateIndex = 0;
+       candidateIndex < wheelwrecker::kDemoCandidateCount;
+       ++candidateIndex) {
+    float candidate[wheelwrecker::kDemoCombinationWheels];
+    expectTrue(wheelwrecker::demoCandidateAt(
+                   candidateIndex, candidate,
+                   wheelwrecker::kDemoCombinationWheels),
+               "decode every demo candidate");
+
+    size_t encodedIndex = 0;
+    for (size_t wheel = 0; wheel < wheelwrecker::kDemoCombinationWheels;
+         ++wheel) {
+      size_t digit = wheelwrecker::kDemoGridMarkCount;
+      for (size_t gridIndex = 0;
+           gridIndex < wheelwrecker::kDemoGridMarkCount;
+           ++gridIndex) {
+        if (candidate[wheel] == wheelwrecker::kDemoGridMarks[gridIndex]) {
+          digit = gridIndex;
+          break;
+        }
+      }
+      expectTrue(digit < wheelwrecker::kDemoGridMarkCount,
+                 "demo candidate uses only grid marks");
+      encodedIndex = encodedIndex * wheelwrecker::kDemoGridMarkCount + digit;
+    }
+    expectEqual(candidateIndex, encodedIndex,
+                "demo candidate follows base-4 order");
+    if (encodedIndex < wheelwrecker::kDemoCandidateCount) {
+      expectTrue(!seen[encodedIndex], "demo candidate is unique");
+      seen[encodedIndex] = true;
+    }
+
+    CombinationPlan plan;
+    expectTrue(wheelwrecker::buildCombinationPlan(
+                   geometry, cursor, Direction::Left, candidate,
+                   wheelwrecker::kDemoCombinationWheels, plan),
+               "plan every demo candidate");
+    expectEqual(wheelwrecker::kDemoCombinationWheels, plan.count,
+                "demo plan has three segments");
+    for (size_t wheel = 0; wheel < plan.count; ++wheel) {
+      const Direction expectedDirection =
+          wheel % 2 == 0 ? Direction::Left : Direction::Right;
+      expectTrue(plan.moves[wheel].direction == expectedDirection,
+                 "demo plan alternates direction");
+      expectEqual(
+          static_cast<uint8_t>(wheelwrecker::kDemoCombinationWheels - wheel),
+          plan.moves[wheel].passesBeforeStop,
+          "demo plan preserves arrival count");
+      expectEqual(geometry.markToStep(candidate[wheel]),
+                  plan.moves[wheel].destinationStep,
+                  "demo plan segment reaches its mark");
+    }
+    cursor = plan.destinationStep;
+  }
+
+  for (size_t index = 0; index < wheelwrecker::kDemoCandidateCount; ++index) {
+    expectTrue(seen[index], "demo grid contains every candidate");
+  }
+}
+
 void testDirectedMoveProperties() {
   const DialGeometry geometry(3200, 100.0f);
 
@@ -333,6 +447,7 @@ int main() {
   testTargetRoundingDoesNotDrift();
   testRelativeMoves();
   testCombinationPlans();
+  testDemoCandidates();
   testDirectedMoveProperties();
 
   if (failures != 0) {

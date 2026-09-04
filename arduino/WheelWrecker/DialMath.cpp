@@ -20,6 +20,26 @@ const char* directionName(Direction direction) {
   return direction == Direction::Left ? "LEFT" : "RIGHT";
 }
 
+const float kDemoGridMarks[kDemoGridMarkCount] = {
+    0.0f, 25.0f, 50.0f, 75.0f};
+
+bool demoCandidateAt(size_t candidateIndex,
+                     float* outputMarks,
+                     size_t outputCapacity) {
+  if (candidateIndex >= kDemoCandidateCount || outputMarks == nullptr ||
+      outputCapacity < kDemoCombinationWheels) {
+    return false;
+  }
+
+  size_t remaining = candidateIndex;
+  for (size_t wheel = kDemoCombinationWheels; wheel > 0; --wheel) {
+    const size_t digit = remaining % kDemoGridMarkCount;
+    outputMarks[wheel - 1] = kDemoGridMarks[digit];
+    remaining /= kDemoGridMarkCount;
+  }
+  return true;
+}
+
 DialGeometry::DialGeometry(int32_t stepsPerRevolution,
                            float dialUnitsPerRevolution)
     : stepsPerRevolution_(3200), dialUnitsPerRevolution_(100.0f) {

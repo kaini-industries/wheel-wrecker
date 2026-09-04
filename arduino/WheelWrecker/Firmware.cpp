@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <errno.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -68,6 +69,18 @@ bool queueActive = false;
 char queueName[24] = "";
 DialMove activeMove = {Direction::Left, 0, 0, 0.0f, 0};
 bool activeMoveValid = false;
+
+struct DemoState {
+  bool active;
+  Direction firstDirection;
+  uint8_t requested;
+  uint8_t completed;
+};
+
+static_assert(wheelwrecker::kDemoCandidateCount <= UINT8_MAX,
+              "DemoState counters must hold every demo candidate");
+
+DemoState demo = {false, Direction::Left, 0, 0};
 
 char inputLine[kLineCapacity];
 size_t inputLength = 0;
@@ -156,6 +169,10 @@ bool motionBusy() {
   return motorMoving || motionSettling();
 }
 
+bool operationBusy() {
+  return demo.active || queueActive || motionBusy();
+}
+
 int32_t currentWrappedStep() {
   return geometry.normalizeStep(stepper.currentPosition());
 }
@@ -220,7 +237,7 @@ void serviceDisplay() {
   }
 }
 
-void cancelQueue() {
+void clearMoveQueue() {
   queueActive = false;
   moveQueueCount = 0;
   moveQueueIndex = 0;
@@ -229,12 +246,19 @@ void cancelQueue() {
   displayDirty = true;
 }
 
+void cancelAllSequences() {
+  clearMoveQueue();
+  demo.active = false;
+  demo.requested = 0;
+  demo.completed = 0;
+}
+
 void immediateStop(const __FlashStringHelper* reason) {
   stepper.setCurrentPosition(stepper.currentPosition());
   motorMoving = false;
   settleDeadlineActive = false;
   disableDeadlineActive = false;
-  cancelQueue();
+  cancelAllSequences();
   setDriverEnabled(false);
   armed = false;
   positionKnown = false;
@@ -311,7 +335,7 @@ void serviceMotor() {
 
   motionSettling();
 
-  if (motorEnabled && !motorMoving && !queueActive && !motionSettling() &&
+  if (motorEnabled && !motorMoving && !operationBusy() &&
       disableDeadlineActive && !deadlinePending(disableDeadline)) {
     setDriverEnabled(false);
     disableDeadlineActive = false;
@@ -352,6 +376,49 @@ bool startQueue(const DialMove* moves, size_t count, const char* name) {
   return true;
 }
 
+bool startNextDemoCombination() {
+  if (!demo.active || demo.completed >= demo.requested || queueActive ||
+      motionBusy()) {
+    return false;
+  }
+
+  float marks[wheelwrecker::kDemoCombinationWheels];
+  if (!wheelwrecker::demoCandidateAt(
+          demo.completed, marks, wheelwrecker::kDemoCombinationWheels)) {
+    return false;
+  }
+
+  CombinationPlan plan;
+  if (!wheelwrecker::buildCombinationPlan(
+          geometry, currentWrappedStep(), demo.firstDirection, marks,
+          wheelwrecker::kDemoCombinationWheels, plan)) {
+    return false;
+  }
+
+  char label[sizeof(queueName)];
+  snprintf(label, sizeof(label), "DEMO %u/%u",
+           static_cast<unsigned int>(demo.completed + 1),
+           static_cast<unsigned int>(demo.requested));
+  if (!startQueue(plan.moves, plan.count, label)) {
+    return false;
+  }
+
+  Serial.print(F("CANDIDATE "));
+  Serial.print(static_cast<unsigned int>(demo.completed + 1));
+  Serial.print('/');
+  Serial.print(static_cast<unsigned int>(demo.requested));
+  Serial.print(F("  "));
+  for (size_t index = 0; index < wheelwrecker::kDemoCombinationWheels;
+       ++index) {
+    if (index > 0) {
+      Serial.print('-');
+    }
+    Serial.print(marks[index], 0);
+  }
+  Serial.println(F("  (commanded only; no open detection)"));
+  return true;
+}
+
 void serviceQueue() {
   if (!queueActive || motionBusy()) {
     return;
@@ -370,7 +437,27 @@ void serviceQueue() {
   Serial.print(queueName);
   Serial.print(F("  dial="));
   Serial.println(geometry.stepToMark(currentWrappedStep()), 4);
-  cancelQueue();
+  clearMoveQueue();
+
+  if (demo.active) {
+    ++demo.completed;
+    if (demo.completed < demo.requested) {
+      if (!startNextDemoCombination()) {
+        immediateStop(F("could not start next demo candidate"));
+        printPrompt();
+      }
+      return;
+    }
+
+    const uint8_t completed = demo.completed;
+    demo.active = false;
+    demo.requested = 0;
+    demo.completed = 0;
+    Serial.print(F("DONE DEMO count="));
+    Serial.print(static_cast<unsigned int>(completed));
+    Serial.println(F("; no open detection was performed"));
+  }
+
   disableDeadline = millis() + idleDisableMillis;
   disableDeadlineActive = true;
   displayDirty = true;
@@ -465,7 +552,7 @@ bool motionCommandAllowed() {
     Serial.println(F("ERR: dial position is unknown; align it and use SETPOS <mark>"));
     return false;
   }
-  if (queueActive || motionBusy()) {
+  if (operationBusy()) {
     Serial.println(F("ERR: motion is already active; use STATUS or STOP"));
     return false;
   }
@@ -481,6 +568,7 @@ void printHelp() {
   Serial.println(F("  JOG <L|R> <dial-units>"));
   Serial.println(F("  TURN <L|R> <revolutions>"));
   Serial.println(F("  COMBO <L|R> <n1> <n2> ... <n5>"));
+  Serial.println(F("  DEMO <L|R> <count>  run 1..64 coarse 3-wheel candidates"));
   Serial.println(F("  SET SPR <steps/rev>    runtime only; must match driver/coupling"));
   Serial.println(F("  SET SPEED <rev/sec> | SET ACCEL <rev/sec^2>"));
   Serial.println(F("  SET REVERSE <ON|OFF> | SET SETTLE <ms> | SET HOLD <ms>"));
@@ -535,7 +623,7 @@ void handleSet(char* arguments[], size_t count) {
     Serial.println(F("ERR: SET expects a setting and one value"));
     return;
   }
-  if (queueActive || motionBusy()) {
+  if (operationBusy()) {
     Serial.println(F("ERR: configuration cannot change during motion"));
     return;
   }
@@ -627,7 +715,7 @@ void handleCalibration(char* arguments[], size_t count) {
     Serial.println(F("ERR: use CAL SCALE <commanded-revs> <observed-revs>"));
     return;
   }
-  if (queueActive || motionBusy()) {
+  if (operationBusy()) {
     Serial.println(F("ERR: calibration cannot change during motion"));
     return;
   }
@@ -669,7 +757,7 @@ void handleLine(char* line) {
   char* arguments[kMaxArguments];
   const size_t count = tokenize(line, arguments, kMaxArguments);
   if (count == 0) {
-    if (!queueActive && !motionBusy()) {
+    if (!operationBusy()) {
       printPrompt();
     }
     return;
@@ -682,10 +770,10 @@ void handleLine(char* line) {
   }
 
   if (strcmp(arguments[0], "DISARM") == 0) {
-    if (queueActive || motionBusy()) {
+    if (operationBusy()) {
       immediateStop(F("operator disarm"));
     } else {
-      cancelQueue();
+      cancelAllSequences();
       setDriverEnabled(false);
       armed = false;
       positionKnown = false;
@@ -703,7 +791,7 @@ void handleLine(char* line) {
   }
 
   if (strcmp(arguments[0], "STATUS") == 0) {
-    if (queueActive || motionBusy()) {
+    if (operationBusy()) {
       printBusyNonBlocking();
     } else {
       printStatus();
@@ -712,7 +800,7 @@ void handleLine(char* line) {
     return;
   }
 
-  if (queueActive || motionBusy()) {
+  if (operationBusy()) {
     printBusyNonBlocking();
     return;
   }
@@ -779,6 +867,32 @@ void handleLine(char* line) {
 
   if (!motionCommandAllowed()) {
     printPrompt();
+    return;
+  }
+
+  if (strcmp(arguments[0], "DEMO") == 0) {
+    Direction direction;
+    long requested = 0;
+    if (count != 3 || !parseDirection(arguments[1], direction) ||
+        !parseLong(arguments[2], requested) || requested < 1 ||
+        requested > static_cast<long>(wheelwrecker::kDemoCandidateCount)) {
+      Serial.println(F("ERR: use DEMO <L|R> <count 1..64>"));
+      printPrompt();
+      return;
+    }
+
+    demo.active = true;
+    demo.firstDirection = direction;
+    demo.requested = static_cast<uint8_t>(requested);
+    demo.completed = 0;
+    Serial.print(F("DEMO START count="));
+    Serial.print(static_cast<unsigned int>(demo.requested));
+    Serial.println(F(" grid=0/25/50/75; STOP/Ctrl-C aborts"));
+    if (!startNextDemoCombination()) {
+      cancelAllSequences();
+      Serial.println(F("ERR: could not start demo"));
+      printPrompt();
+    }
     return;
   }
 

@@ -82,6 +82,34 @@ Verbose help/status output is suppressed during motion; `STATUS` returns only a
 short nonblocking `BUSY`. AccelStepper `run()` replaces the original blocking
 `runToPosition()` calls.
 
+## Bounded demonstration sequencing
+
+`DEMO <L|R> <count>` is a supervised producer for the existing combination
+planner, not a second motion model. It requires the same armed and referenced
+state as `COMBO`, accepts only counts from 1 through 64, and feeds each selected
+three-wheel candidate through the normal fourth/third/second-arrival plan. The
+supplied direction is the first direction for every candidate.
+
+The demonstration grid is `{0,25,50,75}`. Candidate indices are decoded as a
+three-digit base-4 odometer so the last number changes fastest:
+
+```text
+0: (0, 0, 0)
+1: (0, 0, 25)
+2: (0, 0, 50)
+3: (0, 0, 75)
+4: (0, 25, 0)
+...
+63: (75, 75, 75)
+```
+
+The requested count is the prefix length, which gives the operation a fixed
+upper bound. `STOP`, Ctrl-C, and `DISARM` must clear both the active motion plan
+and all remaining demo candidates. The demonstration never actuates a handle,
+reads an open sensor, or changes course when a lock opens. It is intended for
+uncoupled-motor and visible test-dial validation and is not a complete search of
+a 100-mark, three-wheel combination space.
+
 ## Display isolation
 
 The SSD1306 is an optional observer of controller state. It cannot arm motion,
@@ -133,10 +161,11 @@ coupler.
 
 ## Why there is no unattended search loop
 
-A search engine can generate candidate numbers, but this hardware cannot decide
-whether an attempt opened the lock and cannot prove that the dial reached each
-candidate. Automatically advancing after an unobserved stall would corrupt all
-later wheel positions and could damage the lock. Search, checkpoint/resume, and
-travel-minimizing wheel-state optimization belong after measured position,
-open-state sensing, and a physical normally closed stop are integrated and
-tested on a known-combination fixture.
+The bounded `DEMO` sequence can generate a small, deterministic set of motions,
+but this hardware cannot decide whether an attempt opened the lock and cannot
+prove that the dial reached each candidate. Automatically advancing a real
+attack after an unobserved stall would corrupt all later wheel positions and
+could damage the lock. Full search, checkpoint/resume, and travel-minimizing
+wheel-state optimization belong after measured position, open-state sensing,
+and a physical normally closed stop are integrated and tested on a
+known-combination fixture.

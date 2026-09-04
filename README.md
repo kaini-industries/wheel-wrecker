@@ -9,9 +9,10 @@ The firmware boots with no motion scheduled, ENA requesting offline,
 unreferenced, and disarmed. Reset-time ENA safety requires the hardware
 pull-down documented in `HARDWARE.md`. A nonblocking motion loop keeps serial
 `STOP` or Ctrl-C responsive, integer microstep ticks model the 100-mark dial,
-and directed moves and conservative combination sequences are supported. It
-does **not** claim that commanded steps equal measured shaft position, and it
-does not run an unattended search without position and open-detection feedback.
+and directed moves, conservative combination sequences, and a bounded
+supervised demonstration are supported. It does **not** claim that commanded
+steps equal measured shaft position. The demonstration does not actuate a
+handle, detect an opening, or provide unattended searching.
 
 Only use this project on locks you own or have explicit permission to test.
 
@@ -256,8 +257,8 @@ pio device monitor --baud 115200
 The PlatformIO build target is `renesas-ra / uno_r4_wifi` and compiles the same
 `arduino/WheelWrecker` sources used by Arduino IDE. The known-good dependencies
 are pinned in both `platformio.ini` and `sketch.yaml`. With those versions,
-PlatformIO reports 76,480 bytes of flash and 5,952 bytes of static RAM; Arduino
-CLI reports about 90.7 KB and 9,844 bytes respectively. Both fit the RA4M1, and
+PlatformIO reports 77,480 bytes of flash and 5,960 bytes of static RAM; Arduino
+CLI reports 91,688 bytes and 9,852 bytes respectively. Both fit the RA4M1, and
 the build systems link and account for the core differently. The display
 library also allocates a 1,024-byte framebuffer at runtime when an OLED is
 detected.
@@ -293,7 +294,7 @@ test. Make the verified value permanent in
 | Command | Meaning |
 | --- | --- |
 | `HELP` | Print command help |
-| `STATUS` | Show motion, arming, driver, position, and calibration state; returns a short `BUSY` while moving |
+| `STATUS` | Show motion, arming, driver, position, and calibration state; returns a short `BUSY` while a motion sequence or demonstration is active |
 | `ARM` | Permit motion commands; does not itself move or enable the motor |
 | `STOP` or Ctrl-C | Immediately disable motion, disarm, cancel a sequence, and invalidate position |
 | `DISARM` | Disable the driver and invalidate position |
@@ -302,6 +303,7 @@ test. Make the verified value permanent in
 | `JOG <L/R> <units>` | Move a relative number of dial units |
 | `TURN <L/R> <revolutions>` | Move relative complete/fractional revolutions, limited to 20 per command |
 | `COMBO <L/R> <n1> ... <n5>` | Dial 2–5 marks in `0 <= mark < 100`, alternating direction from the supplied first direction |
+| `DEMO <L/R> <count>` | Supervised three-wheel demonstration of the first 1–64 candidates over `{0,25,50,75}`; requires `SETPOS` and `ARM` |
 | `SET SPR <steps>` | Change steps per dial revolution for this boot |
 | `SET SPEED <rev/s>` | Change maximum physical dial speed for this boot |
 | `SET ACCEL <rev/s²>` | Change physical dial acceleration for this boot |
@@ -333,6 +335,8 @@ shows `ENA:N/C` when enable control is configured as disconnected. OLED updates
 are held until the motor and target-settle interval are both stopped so an I²C
 frame transfer cannot introduce gaps in STEP pulse service. Serial input is
 serviced again after each refresh, before the next queued move may start.
+During `DEMO`, the top line uses a form such as `DEMO 3/16 2/3`: the first
+fraction is candidate progress and the second is the current combination leg.
 
 See `HARDWARE.md` for label-to-label wiring. The connector pin order and wire
 colors could not be verified from the project photos.
@@ -355,6 +359,42 @@ dial into the contact area or stall the motor to test opening, because this
 driver provides no load feedback and the opening direction/travel varies by
 lock. Prove the sequence on a transparent or known-combination test lock before
 using it on any closed container.
+
+## Bounded supervised demonstration
+
+`DEMO <L|R> <count>` exercises repeated three-wheel dialing without pretending
+to detect a successful opening. `count` must be from 1 through 64. Candidates
+are drawn from the coarse mark set `{0,25,50,75}` with the last number changing
+fastest. For example, `DEMO L 4` dials `(0,0,0)`, `(0,0,25)`, `(0,0,50)`, and
+`(0,0,75)`. Each candidate uses the same fourth/third/second-arrival motion as a
+three-number `COMBO`, starting in the requested direction. `count` is a number
+of candidates, not a wheel count; larger values can take a long time and still
+require continuous supervision. Candidates advance automatically after the
+normal target-settle interval; there is no separate inspection pause between
+them.
+
+After the requested prefix finishes, the firmware prints `DONE DEMO`, starts
+the normal `HOLD` timer, and remains armed. When `HOLD` expires, it requests
+driver-off and invalidates the open-loop position reference. Use `DISARM` as
+soon as the test is over; if ENA is not wired, only the physical cutoff can
+remove motor torque.
+
+Test the command first with 24 V motor power disconnected:
+
+```text
+SETPOS 0
+ARM
+DEMO L 4
+STOP
+```
+
+Send `STOP` while the demonstration is active; Ctrl-C is equivalent when the
+terminal passes it through. After that software-only check succeeds, repeat
+with the motor uncoupled or attached only to an unloaded visible test dial,
+with the physical cutoff within reach. `DEMO` does not operate a handle, inspect
+an open sensor, pause because a lock opened, or cover the complete 100-mark
+three-wheel space. It is a bounded motion and repeatability test, not an
+autonomous attack.
 
 ## Related project
 

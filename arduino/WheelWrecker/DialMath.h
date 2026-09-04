@@ -63,6 +63,22 @@ class DialGeometry {
 
 constexpr size_t kMaxCombinationWheels = 5;
 
+// Small, deterministic candidate set used by the hardware commissioning demo.
+// Candidate indices are base-4 odometer values: the last wheel changes first.
+constexpr size_t kDemoCombinationWheels = 3;
+constexpr size_t kDemoGridMarkCount = 4;
+constexpr size_t kDemoCandidateCount =
+    kDemoGridMarkCount * kDemoGridMarkCount * kDemoGridMarkCount;
+static_assert(kDemoCombinationWheels <= kMaxCombinationWheels,
+              "Demo plans must fit the motion queue");
+extern const float kDemoGridMarks[kDemoGridMarkCount];
+
+// Decode one demo candidate into outputMarks. Invalid indices, null output, or
+// insufficient output capacity are rejected without modifying the output.
+bool demoCandidateAt(size_t candidateIndex,
+                     float* outputMarks,
+                     size_t outputCapacity);
+
 struct CombinationPlan {
   DialMove moves[kMaxCombinationWheels];
   size_t count;
