@@ -192,6 +192,14 @@ a dial or lock.
   fault-tolerant OLED discovery and stationary status rendering.
 - `arduino/WheelWrecker/sketch.yaml` — reproducible Arduino CLI board and
   library profile.
+- `scripts/run_motor_demo.py` — guarded Python 3 standard-library runner for
+  the bounded demonstration; it does not compile or upload firmware.
+- `scripts/platformio.sh` and `scripts/bootstrap_platformio.sh` — reproducible
+  PlatformIO launcher and project-local Python environment bootstrap.
+- `requirements-platformio.txt` — pinned PlatformIO Core version for that
+  isolated environment.
+- `test/scripts/test_run_motor_demo.py` — pseudo-terminal integration tests for
+  the runner; they cannot discover or open the physical Arduino.
 - `test/native/test_dial_math.cpp` — host tests for wraparound, quantization,
   direction, pass counts, and 4/3/2-arrival combination planning.
 - `HARDWARE.md` — observed parts, wiring assumptions, DIP settings, and power
@@ -250,9 +258,19 @@ PlatformIO remains available for warnings and automated verification:
 
 ```sh
 make build
-pio run --target upload
-pio device monitor --baud 115200
+./scripts/platformio.sh run --target upload
+./scripts/platformio.sh device monitor --baud 115200
 ```
+
+The first command creates the ignored `.venv-platformio` environment with the
+first available Python 3.13, 3.12, 3.11, or 3.10 and installs the pinned
+PlatformIO release. This avoids depending on a system `pio` executable that
+may be attached to Python 3.14. PlatformIO Core 6.1.19 supports Python 3.14,
+but other platform packages installed in the shared PlatformIO directory can
+reject that interpreter while PlatformIO resolves this build. To select an
+interpreter explicitly, use—for example—`PLATFORMIO_PYTHON=python3.12 make
+build`. Set `PIO=pio` only when an existing installation successfully builds
+this environment.
 
 The PlatformIO build target is `renesas-ra / uno_r4_wifi` and compiles the same
 `arduino/WheelWrecker` sources used by Arduino IDE. The known-good dependencies
@@ -268,6 +286,7 @@ Run the hardware-independent tests with any C++11 compiler:
 ```sh
 make test
 make test-sanitize
+make test-runner
 ```
 
 ## Serial command quick start
@@ -388,13 +407,61 @@ DEMO L 4
 STOP
 ```
 
-Send `STOP` while the demonstration is active; Ctrl-C is equivalent when the
-terminal passes it through. After that software-only check succeeds, repeat
-with the motor uncoupled or attached only to an unloaded visible test dial,
-with the physical cutoff within reach. `DEMO` does not operate a handle, inspect
-an open sensor, pause because a lock opened, or cover the complete 100-mark
-three-wheel space. It is a bounded motion and repeatability test, not an
-autonomous attack.
+Send `STOP` followed by Enter while the demonstration is active. Do not rely on
+Ctrl-C when using an arbitrary serial terminal because the terminal may
+intercept it instead of sending it to the board. After that software-only check
+succeeds, repeat with the motor uncoupled or attached only to an unloaded
+visible test dial, with the physical cutoff within reach. `DEMO` does not
+operate a handle, inspect an open sensor, pause because a lock opened, or cover
+the complete 100-mark three-wheel space. It is a bounded motion and
+repeatability test, not an autonomous attack.
+
+### Run the demo from a terminal
+
+The executable helper uses only the Python 3 standard library and controls
+firmware that has already been uploaded; it does not compile or upload the
+sketch. Close Arduino IDE's **Serial Monitor** first so it releases the serial
+port. Preview the default session without opening a port or sending commands:
+
+```sh
+./scripts/run_motor_demo.py --dry-run
+```
+
+A live run defaults to left-first motion, four candidates, and a declared
+starting position of mark zero. It uses Arduino CLI to auto-detect an exact UNO
+R4 WiFi when `--port` is omitted:
+
+```sh
+./scripts/run_motor_demo.py
+```
+
+Select the port or override the motion arguments when needed:
+
+```sh
+./scripts/run_motor_demo.py \
+  --port /dev/cu.usbmodem1101 \
+  --direction R \
+  --count 2 \
+  --position 0
+```
+
+`--direction` accepts `L` or `R` and defaults to `L`; `--count` accepts 1
+through 64 and defaults to 4; and `--position` accepts a dial mark from 0 up to,
+but not including, 100 and defaults to 0. The position is an open-loop
+declaration, not a homing operation: physically align the dial to that mark
+before continuing.
+
+Before it can move anything, the runner opens the port directly at 115200 baud,
+sends `STOP`, verifies that the firmware reports idle, disarmed, and unknown
+position, and confirms that `HELP` includes `DEMO`. It then displays the exact
+commands and requires a confirmation such as `RUN L 4` before sending `SETPOS`,
+`ARM`, and `DEMO`. While attached, you can type `STOP`, `STATUS`, or `DISARM` and
+press Enter. The runner converts Ctrl-C, SIGTERM, SIGHUP, and terminal EOF into
+a textual `STOP`, and it sends `DISARM` after `DONE DEMO`.
+
+Those software measures cannot fail safe after USB loss, cable removal,
+computer failure, or SIGKILL. Keep the physical motor-power cutoff within reach
+throughout every powered run and use it immediately if serial control is lost.
 
 ## Related project
 

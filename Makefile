@@ -1,6 +1,7 @@
 CXX ?= c++
-PIO ?= pio
+PIO ?= ./scripts/platformio.sh
 ARDUINO_CLI ?= arduino-cli
+PYTHON ?= python3
 ARDUINO_PROFILE := uno_r4_wifi
 ARDUINO_BUILD_DIR ?= /tmp/wheel-wrecker-arduino-build
 SKETCH_DIR := arduino/WheelWrecker
@@ -8,7 +9,7 @@ TEST_BINARY := /tmp/wheel-wrecker-dial-tests
 SANITIZED_TEST_BINARY := /tmp/wheel-wrecker-dial-tests-sanitized
 TEST_FLAGS := -std=c++11 -Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion
 
-.PHONY: build arduino-build test test-sanitize verify
+.PHONY: build arduino-build test test-runner test-sanitize verify
 
 build:
 	$(PIO) run
@@ -31,4 +32,8 @@ test-sanitize:
 		test/native/test_dial_math.cpp -o $(SANITIZED_TEST_BINARY)
 	$(SANITIZED_TEST_BINARY)
 
-verify: test test-sanitize build arduino-build
+test-runner:
+	PYTHONDONTWRITEBYTECODE=1 $(PYTHON) -W error::ResourceWarning \
+		-m unittest discover -s test/scripts -v
+
+verify: test test-sanitize test-runner build arduino-build

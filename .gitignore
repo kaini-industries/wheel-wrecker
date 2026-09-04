@@ -1,4 +1,7 @@
 .DS_Store
 .pio
+.venv-platformio/
 .vscode
+__pycache__/
+*.pyc
 hardware_pictures/*

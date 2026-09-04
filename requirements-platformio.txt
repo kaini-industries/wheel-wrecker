@@ -1,0 +1,3 @@
+# Use Python 3.10-3.13 so incompatible globally installed platforms cannot
+# reject the interpreter while PlatformIO resolves this project's build.
+platformio==6.1.19

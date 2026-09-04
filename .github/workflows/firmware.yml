@@ -36,8 +36,11 @@ jobs:
       - name: Run sanitizer tests
         run: make test-sanitize
 
+      - name: Test motor-demo runner
+        run: make test-runner
+
       - name: Compile with PlatformIO
-        run: make build
+        run: make build PIO=pio
 
       - name: Compile with Arduino CLI profile
         run: make arduino-build

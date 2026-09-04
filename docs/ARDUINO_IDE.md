@@ -163,6 +163,69 @@ Do not energize the driver if any safety gate or stop behavior differs from
 these expectations. Continue with the uncoupled motor procedure in
 [`COMMISSIONING.md`](COMMISSIONING.md) only after this test passes.
 
+## 7. Run the supervised demo helper
+
+The executable runner uses only the Python 3 standard library and controls
+firmware that has already been uploaded; it does not compile or upload the
+sketch. Finish the motor-power-off checks above first. Close Arduino IDE's
+**Serial Monitor** before running the helper because only one process can own
+the serial port.
+
+From the repository root, preview the default session:
+
+```sh
+./scripts/run_motor_demo.py --dry-run
+```
+
+Dry-run mode validates the arguments and prints the planned session without
+opening a serial port, arming the controller, or moving the motor. A live run
+with the defaults uses left-first motion, four candidates, and a declared
+starting position of mark zero:
+
+```sh
+./scripts/run_motor_demo.py
+```
+
+When `--port` is omitted, the runner asks Arduino CLI to find exactly one UNO
+R4 WiFi. Specify a port if auto-detection is unavailable or ambiguous, and
+override the motion arguments as needed:
+
+```sh
+./scripts/run_motor_demo.py \
+  --port /dev/cu.usbmodem1101 \
+  --direction R \
+  --count 2 \
+  --position 0
+```
+
+| Option | Meaning | Default |
+| --- | --- | --- |
+| `--port PATH` | Use this serial port instead of Arduino CLI auto-detection | One exact UNO R4 WiFi |
+| `--direction L\|R` | First combination direction | `L` |
+| `--count 1..64` | Number of coarse candidates | `4` |
+| `--position 0..<100` | Mark physically aligned under the index | `0` |
+| `--dry-run` | Print the planned session without opening the port | Off |
+
+`--position` declares the current open-loop coordinate; it does not find or
+home the dial. Physically align the indicated mark under the index before
+confirming a live run.
+
+The runner communicates directly at 115200 baud. Its preflight sends `STOP`,
+then verifies an idle, disarmed, unknown-position response and checks that the
+uploaded firmware's `HELP` output includes `DEMO`. It prints the commands it
+will send and requires the exact confirmation `RUN <direction> <count>`—for
+example, `RUN L 4`—before sending `SETPOS`, `ARM`, and `DEMO`.
+
+During the run, type `STOP`, `STATUS`, or `DISARM` and press Enter to send that
+text to the firmware. The runner translates Ctrl-C, SIGTERM, SIGHUP, and
+terminal EOF into a textual `STOP`; after a normal `DONE DEMO`, it also sends
+`DISARM`. Wait for the corresponding firmware response before assuming the
+motor is stopped or offline.
+
+USB loss, cable removal, computer failure, and SIGKILL can prevent the runner
+from sending its cleanup commands. Keep the physical motor-power cutoff within
+reach for every powered run and use it immediately if serial control is lost.
+
 ## Reproduce the build with Arduino CLI
 
 The checked-in `sketch.yaml` pins the same board core and libraries used above.
